@@ -52,6 +52,7 @@ console.log('three landlord card', threeLandlordCards);
 
 let gameStateTimeout = null;
 
+let bidHistory = [];
 let gameHistory = [];
 let bombNum = 0;
 let lastMoveLandlord = [];
@@ -102,6 +103,54 @@ function PvEDoudizhuDemoView() {
     }
 
     const proceedNextTurn = async (playingCard, rankOnly = true) => {
+        if (gameStatus === "biding"){
+            // delay play for api player
+            if (gameState.currentPlayer !== mainPlayerId) {
+                await timeout(apiPlayDelay);
+            }
+
+            bidHistory.push(playingCard);
+            let strBidHistory = bidHistory.toString();
+            switch (strBidHistory){
+                case "1,0,0":
+                case "1,1,0,1":
+                case "1,0,1,1":
+                case "1,1,1,1":
+                    handleSelectRole('landlord');
+                    break;
+                case "0,1,0":
+                case "1,1,0,0":
+                case "0,1,1,1":
+                    handleSelectRole('landlord_up');
+                    break;
+                case "0,0,1":
+                case "0,1,1,0":
+                case "1,0,1,0":
+                case "1,1,1,0":
+                    handleSelectRole('landlord_down');
+                    break;
+                case "0,0,0":
+                    handleCloseGameEndDialog();
+                    break;
+                default:
+                    setToggleFade('fade-out');
+                    let newGameState = deepCopy(gameState);
+                    newGameState.currentPlayer = (newGameState.currentPlayer + 1) % 3;
+                    newGameState.latestAction[gameState.currentPlayer] = playingCard;
+                    setGameState(newGameState);
+                    setToggleFade('fade-in');
+                    setTimeout(() => {
+                        setToggleFade('');
+                    }, 200);
+
+                    if (gameStateTimeout) {
+                        clearTimeout(gameStateTimeout);
+                    }
+                    break;
+            }
+            return;
+        }
+
         // take played three landlord card out
         if (playerInfo[gameState.currentPlayer].role === 'landlord' && threeLandlordCards.length > 0) {
             let playingCardCopy;
@@ -237,6 +286,7 @@ function PvEDoudizhuDemoView() {
                 : {
                       totalGameNum: 0,
                       totalWinNum: 0,
+                      playerWinNum: 0,
                       landlordGameNum: 0,
                       landlordWinNum: 0,
                       landlordUpGameNum: 0,
@@ -327,9 +377,82 @@ function PvEDoudizhuDemoView() {
         }
     };
 
+    const requestApiBid = async() => {
+        const player_id = playerInfo[gameState.currentPlayer].index;
+        const player_position = playerInfo[gameState.currentPlayer].douzeroPlayerPosition;
+        const init_hand_cards = cardArr2DouzeroFormat(initHands[gameState.currentPlayer].slice().reverse());
+        const original_landlord_cards = cardArr2DouzeroFormat(originalThreeLandlordCards.slice().reverse());
+        const player_hand_cards = cardArr2DouzeroFormat(gameState.hands[gameState.currentPlayer].slice().reverse());
+        const bid_action_seq = bidHistory.join(',');
+        const requestBody = {
+            player_id,
+            player_position,
+            init_hand_cards,
+            player_hand_cards,
+            original_landlord_cards,
+            bid_action_seq,
+        };
+        try {
+			console.log("Trying to get bid results from AI")
+            const apiRes = await axios.post(`${douzeroDemoUrl}/bid`, qs.stringify(requestBody));
+			console.log("Got bid results", apiRes)
+            const data = apiRes.data;
+            if (data.status !== 0) {
+                if (data.status === -1) {
+                    Message({
+                        message: 'Error receiving prediction result, please try refresh the page',
+                        type: 'error',
+                        showClose: true,
+                    });
+                } else {
+                    Message({
+                        message: `Error: ${apiRes.data.message}`,
+                        type: 'error',
+                        showClose: true,
+                    });
+                }
+            } else {
+                let bestAction = '';
+                console.log("All action probs", data.result)
+                if (data.result && Object.keys(data.result).length > 0) {
+                    const sortedResult = Object.entries(data.result).sort((a, b) => {
+                        return Number(b[1]) - Number(a[1]);
+                    });
+                    setPredictionRes({
+                        prediction: sortedResult.map((result) => {
+                            return [result[0], data.win_rates[result[0]]];
+                        }),
+                        hands: gameState.hands[gameState.currentPlayer].slice(),
+                    });
+                    if (Object.keys(data.result).length === 1) bestAction = Object.keys(data.result)[0];
+                    else {
+                        bestAction = Object.keys(data.result)[0];
+                        let bestConfidence = Number(data.result[Object.keys(data.result)[0]]);
+                        for (let i = 1; i < Object.keys(data.result).length; i++) {
+                            if (Number(data.result[Object.keys(data.result)[i]]) > bestConfidence) {
+                                bestAction = Number(Object.keys(data.result)[i]);
+                                bestConfidence = Number(data.result[Object.keys(data.result)[i]]);
+                            }
+                        }
+                    }
+                }
+                console.log(bestAction)
+                proceedNextTurn(bestAction);
+            }
+        } catch (err) {
+            Message({
+                message: 'Error receiving prediction result, please try refresh the page',
+                type: 'error',
+                showClose: true,
+            });
+        }
+    };
+
     const requestApiPlay = async () => {
         // gather information for api request
+        const player_id = playerInfo[gameState.currentPlayer].index;
         const player_position = playerInfo[gameState.currentPlayer].douzeroPlayerPosition;
+        const init_hand_cards = cardArr2DouzeroFormat(initHands[gameState.currentPlayer].slice().reverse());
         const player_hand_cards = cardArr2DouzeroFormat(gameState.hands[gameState.currentPlayer].slice().reverse());
         const num_cards_left_landlord =
             gameState.hands[playerInfo.find((player) => player.douzeroPlayerPosition === 0).index].length;
@@ -338,6 +461,8 @@ function PvEDoudizhuDemoView() {
         const num_cards_left_landlord_up =
             gameState.hands[playerInfo.find((player) => player.douzeroPlayerPosition === 2).index].length;
         const three_landlord_cards = cardArr2DouzeroFormat(threeLandlordCards.slice().reverse());
+        const original_landlord_cards = cardArr2DouzeroFormat(originalThreeLandlordCards.slice().reverse());
+        const bid_action_seq = bidHistory.join(',');
         const card_play_action_seq = gameHistory
             .map((cards) => {
                 return cardArr2DouzeroFormat(cards);
@@ -360,21 +485,13 @@ function PvEDoudizhuDemoView() {
         const played_cards_landlord_up = cardArr2DouzeroFormat(playedCardsLandlordUp);
 
         const requestBody = {
+            player_id,
             player_position,
+            init_hand_cards,
             player_hand_cards,
-            num_cards_left_landlord,
-            num_cards_left_landlord_down,
-            num_cards_left_landlord_up,
-            three_landlord_cards,
+            original_landlord_cards,
             card_play_action_seq,
-            other_hand_cards,
-            last_move_landlord,
-            last_move_landlord_down,
-            last_move_landlord_up,
-            bomb_num,
-            played_cards_landlord,
-            played_cards_landlord_down,
-            played_cards_landlord_up,
+            bid_action_seq,
         };
 
         try {
@@ -430,6 +547,7 @@ function PvEDoudizhuDemoView() {
                 }
             } else {
                 let bestAction = '';
+                console.log("All action probs", data.result)
                 if (data.result && Object.keys(data.result).length > 0) {
                     const sortedResult = Object.entries(data.result).sort((a, b) => {
                         return Number(b[1]) - Number(a[1]);
@@ -452,6 +570,7 @@ function PvEDoudizhuDemoView() {
                         }
                     }
                 }
+                console.log(bestAction)
                 proceedNextTurn(bestAction.split(''));
             }
         } catch (err) {
@@ -480,7 +599,7 @@ function PvEDoudizhuDemoView() {
         setSelectedCards(newSelectedCards);
     };
 
-    const handleSelectRole = (role) => {
+    const firstClick = () => {
         const playerInfoTemplate = [
             {
                 id: 0,
@@ -501,23 +620,36 @@ function PvEDoudizhuDemoView() {
                 douzeroPlayerPosition: -1,
             },
         ];
+        playerInfo = deepCopy(playerInfoTemplate);
+        setGameStatus('biding');
+        syncGameStatus = 'biding';
+        setGameState({
+            hands: initHands.map((element) => sortDoudizhuCards(element)),
+            latestAction: [[], [], []],
+            currentPlayer: mainPlayerId, // index of current player
+            turn: 0,
+        });
+        gameStateTimer();
+    };
+
+    const handleSelectRole = (role) => {
         switch (role) {
             case 'landlord_up':
-                playerInfo = deepCopy(playerInfoTemplate);
                 playerInfo[1].role = 'landlord';
                 break;
             case 'landlord':
-                playerInfo = deepCopy(playerInfoTemplate);
                 playerInfo[0].role = 'landlord';
                 break;
             case 'landlord_down':
-                playerInfo = deepCopy(playerInfoTemplate);
                 playerInfo[2].role = 'landlord';
                 break;
             default:
                 break;
         }
         const landlordIdx = playerInfo.find((player) => player.role === 'landlord').index;
+        const newGameState = deepCopy(gameState);
+        newGameState.currentPlayer = null;
+        setGameState(newGameState);
         playerInfo[landlordIdx].douzeroPlayerPosition = 0;
         playerInfo[(landlordIdx + 1) % 3].douzeroPlayerPosition = 1;
         playerInfo[(landlordIdx + 2) % 3].douzeroPlayerPosition = 2;
@@ -587,6 +719,7 @@ function PvEDoudizhuDemoView() {
         playerInfo = [];
 
         gameStateTimeout = null;
+        bidHistory = [];
         gameHistory = [];
         bombNum = 0;
         lastMoveLandlord = [];
@@ -607,6 +740,7 @@ function PvEDoudizhuDemoView() {
             currentPlayer: null, // index of current player
             turn: 0,
         });
+        console.log("Close game end dialog", gameState.turn);
         setSelectedCards([]); // user selected hand card
         setPredictionRes({ prediction: [], hands: [] });
         setHideRivalHand(hidePredictionArea);
@@ -614,6 +748,8 @@ function PvEDoudizhuDemoView() {
         setGameStatus('ready');
         syncGameStatus = 'ready';
         setIsGameEndDialogOpen(false);
+        console.log("Close game end dialog", gameState.turn);
+        firstClick();
     };
 
     const startGame = async () => {
@@ -636,7 +772,7 @@ function PvEDoudizhuDemoView() {
             const apiRes = await axios.post(`${douzeroDemoUrl}/legal`, qs.stringify(requestBody));
             const data = apiRes.data;
             legalActions = {
-                turn: 0,
+                turn: gameState.turn,
                 actions: data.legal_action.split(','),
             };
             setIsHintDisabled(data.legal_action === '');
@@ -655,6 +791,14 @@ function PvEDoudizhuDemoView() {
             // if current player is not user, request for API player
             if (gameState.currentPlayer !== mainPlayerId) {
                 requestApiPlay();
+            } else {
+                setPredictionRes({ prediction: [], hands: [] });
+            }
+        }
+        if (gameState.currentPlayer !== null && syncGameStatus === 'biding') {
+            // if current player is not user, request for API player
+            if (gameState.currentPlayer !== mainPlayerId) {
+                requestApiBid();
             } else {
                 setPredictionRes({ prediction: [], hands: [] });
             }
@@ -730,6 +874,19 @@ function PvEDoudizhuDemoView() {
         }
     };
 
+    const handleMainPlayerBid = (type) => {
+        switch (type) {
+            case 'bid': {
+                proceedNextTurn(1, false);
+                break;
+            }
+            case 'pass': {
+                proceedNextTurn(0, false);
+                break;
+            }
+        }
+    };
+
     const computePredictionCards = (cards, hands) => {
         let computedCards = [];
         if (cards.length > 0) {
@@ -793,11 +950,11 @@ function PvEDoudizhuDemoView() {
                         )}
                     </div>
                     {predictionRes.prediction.length > idx ? (
-                        <div className={'non-card'} style={{ marginTop: '0px' }}>
-                            <span>{`${t('doudizhu.expected_win_rate')}: ${(
-                                Number(predictionRes.prediction[idx][1]) * 100
-                            ).toFixed(2)}%`}</span>
-                        </div>
+                      <div className={'non-card'} style={{ marginTop: '0px' }}>
+                          <span>{`${t('doudizhu.confidence')}: ${(
+                              Number(predictionRes.prediction[idx][1]) * 100
+                          ).toFixed(2)}%`}</span>
+                      </div>
                     ) : (
                         ''
                     )}
@@ -934,7 +1091,8 @@ function PvEDoudizhuDemoView() {
                         <div style={{ height: '100%' }}>
                             <Paper className={'doudizhu-gameboard-paper'} elevation={3}>
                                 <DoudizhuGameBoard
-                                    showCardBack={gameStatus === 'playing' && hideRivalHand}
+                                    showCardBack={(gameStatus === 'playing' || gameStatus === 'biding') && hideRivalHand}
+                                    firstClick={firstClick}
                                     handleSelectRole={handleSelectRole}
                                     isPassDisabled={isPassDisabled}
                                     isHintDisabled={isHintDisabled}
@@ -955,6 +1113,7 @@ function PvEDoudizhuDemoView() {
                                         handleLocaleChange(newLocale);
                                         setGameStatus('ready');
                                     }}
+                                    handleMainPlayerBid={handleMainPlayerBid}
                                 />
                             </Paper>
                         </div>
@@ -973,7 +1132,9 @@ function PvEDoudizhuDemoView() {
                                                 <div
                                                     key={'probability-cards-' + rankText + '-' + suitText}
                                                     style={{ fontSize: '1.2em' }}
-                                                    className={`card ${rankClass} full-content ${suitClass}`}
+                                                    className={`card ${
+                                                        (gameStatus === 'biding') && hideRivalHand ? 'back' : '' + rankClass + ' ' + suitClass
+                                                    }`}
                                                 >
                                                     <span className="rank">{rankText}</span>
                                                     <span className="suit">{suitText}</span>
@@ -997,7 +1158,7 @@ function PvEDoudizhuDemoView() {
                             )}
                             <Divider />
                             <div className={'probability-player'} style={{ height: '19px', textAlign: 'center' }}>
-                                {playerInfo.length > 0 && gameState.currentPlayer !== null ? (
+                                {playerInfo.length > 0 && gameState.currentPlayer !== null && gameStatus !== "biding" ? (
                                     <span>
                                         {t(
                                             `doudizhu.${
