@@ -23,12 +23,12 @@
         "ai_thinking_time": "AI考虑时间",
         "landlord": "地主",
         "expected_win_rate": "预计胜率",
-        "confidence": "概率",
         "pass": "过",
         "deselect": "取消选择",
         "hint": "提示",
         "play": "出牌",
         "bid": "叫地主",
-        "start": "开始游戏"
+        "start": "开始游戏",
+        "confidence": "概率"
     }
 }

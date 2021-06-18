@@ -26,6 +26,9 @@
         "pass": "Pass",
         "deselect": "Deselect",
         "hint": "Hint",
-        "play": "Play"
+        "play": "Play",
+        "bid": "Bid",
+        "start": "Start",
+        "confidence": "Confidence"
     }
 }
