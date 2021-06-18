@@ -89,6 +89,20 @@ class DoudizhuGameBoard extends React.Component {
     }
 
     computeSingleLineHand(inputCards, fadeClassName = '', cardSelectable = false) {
+        if (inputCards === '1' || inputCards === 1) {
+          return (
+              <div className="non-card">
+                  <span>BID</span>
+              </div>
+          );
+        }
+        if (inputCards === '0' || inputCards === 0) {
+          return (
+              <div className="non-card">
+                  <span>PASS</span>
+              </div>
+          );
+        }
         const cards = inputCards === 'pass' ? inputCards : sortDoudizhuCards(inputCards);
         if (cards === 'pass') {
             return (
@@ -206,6 +220,42 @@ class DoudizhuGameBoard extends React.Component {
             fadeClassName = 'scale-fade-in';
         if (this.props.currentPlayer === playerIdx) {
             if (this.props.mainPlayerId === this.props.playerInfo[this.props.currentPlayer].id) {
+                if (this.props.gameStatus === 'biding') {
+                  return (
+                      <div className={'main-player-action-wrapper'}>
+                          <div style={{ marginRight: '2em' }} className={'timer ' + fadeClassName}>
+                              <div className="timer-text">{millisecond2Second(this.props.considerationTime)}</div>
+                          </div>
+                          {this.props.gamePlayable ? (
+                              <>
+                                  <Button
+                                      disabled={false}
+                                      onClick={(e) => {
+                                          e.stopPropagation();
+                                          this.props.handleMainPlayerBid('pass');
+                                      }}
+                                      style={{ marginRight: '2em' }}
+                                      variant="contained"
+                                      color="primary"
+                                  >
+                                      Pass
+                                  </Button>
+                                  <Button
+                                      disabled={false}
+                                      onClick={(e) => {
+                                          e.stopPropagation();
+                                          this.props.handleMainPlayerBid('bid');
+                                      }}
+                                      variant="contained"
+                                      color="primary"
+                                  >
+                                      Bid
+                                  </Button>
+                              </>
+                          ) : undefined}
+                      </div>
+                  );
+                }
                 return (
                     <div className={'main-player-action-wrapper'}>
                         <div style={{ marginRight: '2em' }} className={'timer ' + fadeClassName}>
@@ -355,7 +405,7 @@ class DoudizhuGameBoard extends React.Component {
                     </div>
                     <div id={'bottom-player'}>
                         <div className="played-card-area">
-                            {bottomIdx >= 0 ? this.playerDecisionArea(bottomIdx) : ''}
+                            {bottomIdx >= 0 && (this.props.gameStatus === 'playing' || this.props.gameStatus === 'biding') ? this.playerDecisionArea(bottomIdx) : ''}
                         </div>
                         <div className="player-main-area">
                             <div className="player-info">{this.computePlayerPortrait(bottomId, bottomIdx)}</div>
@@ -385,35 +435,13 @@ class DoudizhuGameBoard extends React.Component {
                         }}
                     >
                         <Button
-                            onClick={() => this.props.handleSelectRole('landlord_up')}
+                            onClick={() => this.props.firstClick()}
                             style={{ width: '225px' }}
                             variant="contained"
                             color="primary"
                             startIcon={<img src={Peasant_wName} alt="Peasant" width="48px" height="48px" />}
                         >
-                            Play as Peasant
-                            <br />
-                            (Landlord Up)
-                        </Button>
-                        <Button
-                            onClick={() => this.props.handleSelectRole('landlord')}
-                            style={{ width: '225px', marginTop: '20px', marginBottom: '20px' }}
-                            variant="contained"
-                            color="primary"
-                            startIcon={<img src={Landlord_wName} alt="Peasant" width="48px" height="48px" />}
-                        >
-                            Play as Landlord
-                        </Button>
-                        <Button
-                            onClick={() => this.props.handleSelectRole('landlord_down')}
-                            style={{ width: '225px' }}
-                            variant="contained"
-                            color="primary"
-                            startIcon={<img src={Peasant_wName} alt="Peasant" width="48px" height="48px" />}
-                        >
-                            Play as Peasant
-                            <br />
-                            (Landlord Down)
+                            Start Game
                         </Button>
                     </Layout.Row>
                 ) : undefined}
